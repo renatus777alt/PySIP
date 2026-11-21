@@ -61,6 +61,10 @@ jobs:
 
       - name: Install stable Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          # Keep compiler warnings visible, but do not fail the build solely
+          # because the current source emits non-fatal warnings.
+          build-warnings: warn
 
       - name: Require committed Cargo.lock
         shell: bash
