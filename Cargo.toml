@@ -1,0 +1,21 @@
+[package]
+name = "pysip-server"
+version = "1.0.1"
+edition = "2021"
+description = "PySIP Rust SIP registrar/proxy with SQLite accounts and RTP relay"
+license = "MIT"
+
+[[bin]]
+name = "pysip-server"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "signal", "sync"] }
+rusqlite = { version = "0.34", features = ["bundled"] }
+md-5 = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+regex = "1"
+hex = "0.4"
+if-addrs = "0.13"
