@@ -1,101 +1,81 @@
-# PySIP 1.0.1 - Rust SIP core
+# PySIP
 
-This folder is a Rust rewrite of the SIP service from PySIP 1.0. The existing
-Python `web_panel.py` is intentionally not rewritten: it continues to manage
-accounts and the same SQLite database (`pysip.db`). The Rust service opens that
-same database and uses the existing `users`, `registrations`, `sip_contacts`,
-`settings`, and `calls` tables.
+**Rust SIP service + Python web control panel**
 
+PySIP is a small SIP registrar/proxy intended for testing and use on a trusted home network or private VPN. The SIP signaling and RTP/RTCP relay are implemented in Rust. The account and administrator web interface remains a Python standard-library application. Both services share one SQLite database, `pysip.db`.
 
-## 1.0.1 compiler fixes
+> **Status:** community/personal project, not a production-grade PBX or a security-audited SIP platform. Keep it on a trusted LAN or private VPN. Do not expose the SIP, RTP, or web-panel ports directly to the public internet.
 
-This patch corrects the Rust ownership and lifetime errors reported when
-compiling the initial 1.0 source archive:
+## Features
 
-- `SipMessage::cseq` now keeps the header string alive while parsing its tokens.
-- SIP response header additions use `mem::take` before replacing an `Outbound`
-  packet, avoiding moves out of indexed vector elements.
-- `Transaction` now stores the callee username used by late-fork cleanup.
-- In-dialog target URI construction no longer uses a moved `String`.
-- Removed the unused `mut` bindings and unused timeout tuple variable.
+- SIP Digest account authentication compatible with existing PySIP accounts (`sip_ha1`).
+- Account lookup by username or generated `+190...` phone number.
+- Multiple active Contact registrations per account, with a configured maximum of 16 devices.
+- INVITE forking to registered devices; first successful 2xx answer wins and other ringing branches receive CANCEL.
+- Core call signaling: INVITE, ACK, CANCEL, BYE.
+- Local REGISTER and OPTIONS handling.
+- Proxying for PRACK, UPDATE, INFO, REFER, MESSAGE, SUBSCRIBE, NOTIFY, and PUBLISH. These extension methods are routed to endpoints; PySIP does not implement application-specific presence/event-package services.
+- Busy, decline, unavailable, and unanswered-call handling with call-history updates.
+- One IPv4 audio stream using a pass-through RTP/RTCP relay. PySIP does not decode, record, or transcode audio.
+- SDP rewriting that preserves codec attributes while directing media through the relay.
+- SQLite schema creation/migration, WAL mode, contact expiry, bounded SIP packet/header sizes, Max-Forwards handling, source-IP rate limiting, signed Digest nonces, and nonce-count replay checks.
+- Interactive advertised-IPv4 selection, with an environment-variable override.
+- Retro-style Python web panel for registration, personal account management, and administration.
 
-Build and test from the directory containing `Cargo.toml`:
+## Project layout
 
-```bash
-cargo test
-cargo build --release
+```text
+PySIP/
+├── Cargo.toml
+├── Cargo.lock                 # Generate and commit this for reproducible builds
+├── README.md
+├── LICENSE
+├── SECURITY.md
+├── .gitignore
+├── src/
+│   └── main.rs
+├── web_panel.py
+└── pysip.db                   # Created at first run; DO NOT distribute
 ```
 
-## Files
+The source archive intentionally does not contain a live database, account credentials, logs, or compiled binaries.
 
-- `Cargo.toml` - Rust package and dependencies.
-- `src/main.rs` - SIP registrar/proxy, SQLite access, call routing and RTP relay.
+## Requirements
 
-Keep your existing `web_panel.py` beside the project and keep `pysip.db` in the
-working directory used by both processes. Back up `pysip.db` before the first
-run of the Rust version.
+### Runtime
 
-## Features ported
+- Rust SIP service: a compatible Windows or Linux binary built from this source.
+- Web panel: Python 3.10 or newer. It uses only the Python standard library; there is no `pip install` step.
+- A writable application/data directory for `pysip.db` and SQLite's temporary `-wal`/`-shm` files.
 
-- SIP Digest authentication using the existing `sip_ha1` database value
-  (`MD5(username:realm:password)`) for compatibility with existing accounts.
-- REGISTER with multiple Contacts per account, contact expiry, wildcard
-  unregister, Call-ID/CSeq ordering and legacy `registrations` migration.
-- Username and generated `+190...` phone-number destination lookup.
-- OPTIONS, INVITE, ACK, CANCEL, BYE, PRACK, UPDATE, INFO, REFER, MESSAGE,
-  SUBSCRIBE, NOTIFY and PUBLISH handling/routing.
-- INVITE forking to multiple registered devices; the first 2xx answer wins and
-  other ringing branches receive CANCEL.
-- Busy, decline, timeout and call-history updates.
-- IPv4 UDP SIP on port 5060 by default.
-- One audio media stream using an RTP/RTCP UDP relay. SDP rewriting keeps codec
-  attributes, changes the media ports and removes `rtcp-mux` so RTP and RTCP use
-  the separate relay sockets.
-- SQLite WAL mode, expiry cleanup, bounded packet/header sizes, Max-Forwards
-  checks, per-source packet rate limiting, signed Digest nonces and nonce-count
-  replay checks.
-- Interactive selection of the advertised LAN/VPN IPv4 address. Set
-  `PYSIP_ADVERTISED_HOST` to bypass the prompt.
+### Build
 
-The server handles REGISTER and OPTIONS locally. It proxies the listed call,
-message and event methods to registered endpoints. SUBSCRIBE/NOTIFY/PUBLISH
-are not a presence/event server: event-package behavior is the endpoint's job.
-Unknown methods receive `501 Not Implemented`.
+- Current stable Rust toolchain (`rustc` and `cargo`).
+- A C toolchain for the bundled SQLite build used by `rusqlite`.
+- For Windows GNU cross-compilation from WSL2/other distro: `mingw-w64`.
 
-## WSL2 Debian installation using the Rsproxy mirror
+## Build and test on Debian / WSL2
 
-The commands below use the Rsproxy Rustup distribution mirror and its sparse
-Cargo registry mirror. They are optional alternatives to the default Rust
-servers.
-
-1. Install build prerequisites:
+Install build tools:
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential curl ca-certificates pkg-config
 ```
 
-2. Install Rust stable via Rsproxy:
+Install Rust with Rustup. If the default Rust distribution host is slow or inaccessible from your network, an optional Rsproxy mirror setup is shown below.
 
 ```bash
 export RUSTUP_DIST_SERVER=https://rsproxy.cn
 export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
 curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh
-```
-
-When the installer finishes, load Cargo into the current shell:
-
-```bash
 . "$HOME/.cargo/env"
 rustup default stable
 rustc --version
 cargo --version
 ```
 
-If `cargo` is not found in a newly opened terminal, run `. "$HOME/.cargo/env"`
-or reopen the terminal.
-
-3. Configure Cargo to download crates through Rsproxy:
+Optional Cargo registry mirror configuration:
 
 ```bash
 mkdir -p "$HOME/.cargo"
@@ -111,100 +91,189 @@ git-fetch-with-cli = true
 TOML
 ```
 
-The sparse registry configuration requires a modern stable Rust toolchain.
-
-## Build and test
-
-Run these commands from the directory containing `Cargo.toml`:
+Run the tests and build the Linux binary:
 
 ```bash
 cargo test
 cargo build --release
 ```
 
-The optimized executable is:
+The executable is `target/release/pysip-server`.
+
+## Build a Windows x64 executable from WSL2/other distro
+
+Install MinGW and the Rust Windows GNU target:
+
+```bash
+sudo apt install -y mingw-w64
+rustup target add x86_64-pc-windows-gnu
+```
+
+Configure the linker from the project root:
+
+```bash
+mkdir -p .cargo
+cat > .cargo/config.toml <<'TOML'
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+TOML
+```
+
+Build:
+
+```bash
+export CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc
+export AR_x86_64_pc_windows_gnu=x86_64-w64-mingw32-ar
+cargo test
+cargo build --release --target x86_64-pc-windows-gnu
+```
+
+The executable is:
 
 ```text
-target/release/pysip-server
+target/x86_64-pc-windows-gnu/release/pysip-server.exe
 ```
 
-To run it:
+A GNU-target executable may require MinGW runtime DLLs on Windows. Before distributing it, test it on a clean Windows machine. Alternatively, build the MSVC target on Windows with the Visual Studio C++ Build Tools installed.
 
-```bash
-./target/release/pysip-server
-```
+## Start PySIP
 
-The server lists available local IPv4 addresses. Select the LAN/VPN address
-that your SIP clients can reach. It listens on `0.0.0.0:5060/UDP` by default,
-but it must advertise a real reachable interface address, not `0.0.0.0` or
-`127.0.0.1`.
+Run both programs from the same directory so they use the same `pysip.db` and realm configuration. Keep the web panel and SIP service running together.
 
-You can skip the prompt by setting an explicit address:
-
-```bash
-PYSIP_ADVERTISED_HOST=192.168.0.103 ./target/release/pysip-server
-```
-
-Relevant environment variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `PYSIP_DB_PATH` | `pysip.db` | Shared SQLite database path |
-| `PYSIP_REALM` | `pysip.local` | SIP Digest realm; must match the web panel's realm |
-| `PYSIP_HOST` | `0.0.0.0` | SIP bind address |
-| `PYSIP_PORT` | `5060` | SIP UDP port |
-| `PYSIP_ADVERTISED_HOST` | interactive | Address inserted into SIP/SDP |
-| `PYSIP_RTP_PORT_MIN` | `20000` | Lowest RTP/RTCP relay port |
-| `PYSIP_RTP_PORT_MAX` | `30000` | Highest RTP/RTCP relay port |
-
-## Run with the existing Python web panel
-
-Run both programs from the same project/data directory so they use the same
-`pysip.db` file. In one WSL terminal:
+Terminal 1, start the web panel:
 
 ```bash
 python3 web_panel.py
 ```
 
-In a second WSL terminal:
+On Windows:
+
+```cmd
+python web_panel.py
+```
+
+The web panel prints a generated administrator password when `PYSIP_ADMIN_PASSWORD` is not set. Save it securely. The panel's default bind address is `127.0.0.1:8080`, so it is only reachable from the local machine by default.
+
+Terminal 2, start the Rust SIP service:
 
 ```bash
 ./target/release/pysip-server
 ```
 
-Open the web panel at `http://127.0.0.1:8080/` from the Windows browser if your
-existing panel is bound to `0.0.0.0` or localhost forwarding is available in
-WSL2. The web panel remains Python and is not included in this Rust-source ZIP.
+On Windows, run the compiled `pysip-server.exe` from the same working directory.
+
+At startup, select the LAN or VPN IPv4 address that SIP clients can reach. The service binds to `0.0.0.0:5060/UDP` by default, but the advertised address must be a real interface address. Do not advertise `0.0.0.0` or `127.0.0.1` to remote clients.
+
+You can bypass the prompt with:
+
+```bash
+PYSIP_ADVERTISED_HOST=192.168.0.103 ./target/release/pysip-server
+```
+
+Windows CMD:
+
+```cmd
+set PYSIP_ADVERTISED_HOST=192.168.0.103
+pysip-server.exe
+```
+
+Replace the example address with the address reachable by your SIP clients. For VPN use, select the VPN adapter's address.
+
+## Shared database and existing accounts
+
+Both services use `pysip.db` in the current working directory unless `PYSIP_DB_PATH` is set. The SIP Digest realm defaults to `pysip.local`; it must match the realm used by the web panel and existing account `sip_ha1` values.
+
+Before upgrading an existing installation:
+
+1. Stop both services.
+2. Make a private backup of `pysip.db`.
+3. Put the database in the directory from which both services will run, or set the same `PYSIP_DB_PATH` for both.
+4. Start the web panel and SIP service.
+5. Verify account registration and a test call before deleting any backup.
+
+**Never commit or publish `pysip.db`.** It contains account password hashes, SIP Digest HA1 values, assigned phone numbers, registered Contact information, client IP addresses, user-agent strings, and call metadata. SQLite may also create `pysip.db-wal` and `pysip.db-shm`; those are private runtime data too.
+
+## Configuration
+
+The Rust SIP service reads these environment variables:
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PYSIP_DB_PATH` | `pysip.db` | Shared SQLite database path |
+| `PYSIP_REALM` | `pysip.local` | SIP Digest realm; keep it consistent with the web panel and existing accounts |
+| `PYSIP_HOST` | `0.0.0.0` | SIP bind address |
+| `PYSIP_PORT` | `5060` | SIP UDP port |
+| `PYSIP_ADVERTISED_HOST` | interactive selection | IPv4 address advertised in SIP/SDP |
+| `PYSIP_RTP_PORT_MIN` | `20000` | First port in the RTP/RTCP relay range |
+| `PYSIP_RTP_PORT_MAX` | `30000` | Last port in the RTP/RTCP relay range |
+
+The Python web panel additionally reads:
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PYSIP_WEB_HOST` | `127.0.0.1` | Web-panel bind address |
+| `PYSIP_WEB_PORT` | `8080` | Web-panel TCP port |
+| `PYSIP_ADMIN_USERNAME` | `admin` | Administrator username |
+| `PYSIP_ADMIN_PASSWORD` | generated at startup | Set a strong private value to avoid a newly generated password each start |
+
+Set shared variables such as `PYSIP_DB_PATH` and `PYSIP_REALM` consistently for both processes.
 
 ## Network ports
 
-For LAN/VPN testing, allow these ports only on the trusted LAN/VPN interface:
+For a private LAN/VPN test setup, permit traffic only from trusted client devices:
 
-- UDP 5060 - SIP signaling.
-- UDP 20000-30000 - RTP/RTCP relay.
-- TCP 8080 - Python web panel (managed by the existing Python service).
+| Port | Protocol | Purpose |
+|---|---|---|
+| `5060` | UDP | SIP signaling |
+| `20000-30000` | UDP | RTP/RTCP relay |
+| `8080` | TCP | Web panel; loopback-only by default |
 
-Do not expose this service directly to the public internet. Keep it behind a
-private VPN or trusted LAN.
+If you deliberately bind the web panel to a LAN/VPN interface, restrict TCP 8080 to trusted peers using the host firewall. Do not expose it directly to the internet.
 
-## Important scope and limitations
+## Security notes
 
-This is a source port of the current PySIP prototype, not a certified PBX or a
-complete implementation of every SIP extension. The server supports IPv4 UDP
-signaling and one RTP/RTCP audio stream per call. It does not provide SIP over
-TCP/TLS, SRTP, ICE/STUN/TURN, transcoding, recording, multi-party conference
-bridging, or a presence server. Keep it on a private LAN/VPN.
+- Use PySIP only on a trusted LAN or private VPN.
+- Do not port-forward SIP, RTP, or the web panel from your router to the public internet.
+- SIP Digest compatibility uses MD5 HA1, which is a legacy SIP authentication scheme. It is not a substitute for TLS/SRTP.
+- SIP over TCP/TLS, SRTP, ICE/STUN/TURN, IPv6 media, transcoding, recording, and conference bridging are not provided by this version.
+- The web panel uses plain HTTP and has no TLS of its own. Its default `127.0.0.1` bind is intentional.
+- Use a unique, strong password for every SIP account and a strong administrator password.
+- Keep the database and logs private; do not paste them into public issue trackers without removing account data, addresses, and call details.
+- Back up the database while the services are stopped, or use SQLite's online backup facility.
 
-### Validation status
+## Source and binary distribution
 
-The database schema/table compatibility was checked against the uploaded
-PySIP Python server source, and Rust unit tests are included for SIP parsing,
-keepalives, digest formatting, phone-number normalization, SDP codec preservation,
-and the existing SQLite account/contact schema.
+For a **source release**, publish:
 
-The Rust toolchain and crate registry were not available in the build
-container, so this source archive has **not been compiled or executed here**.
-Run `cargo test` first in WSL2. Treat the Rust port as an initial test build
-until it compiles cleanly and you have exercised registration, two-device
-ringing, answer/decline/BYE, and real phone-to-PC audio with your existing
-clients. Keep the original Python `sip_server.py` as a rollback copy.
+- `Cargo.toml`
+- `Cargo.lock` (generate it with Cargo and commit it for reproducible dependency resolution)
+- `src/main.rs`
+- `web_panel.py`
+- `README.md`
+- `LICENSE`
+- `SECURITY.md`
+- `.gitignore`
+
+For a **Windows x64 binary release**, publish a ZIP containing:
+
+- `pysip-server.exe`
+- `web_panel.py`
+- `README.md`
+- `LICENSE`
+- a small launch script if desired
+
+For a **Linux x64** or **Linux ARM64 binary release**, publish a separate archive for each architecture containing:
+
+- `pysip-server` built for that architecture
+- `web_panel.py`
+- `README.md`
+- `LICENSE`
+- a small launch script if desired
+
+Binary releases still require Python 3.10+ for the web panel. No third-party Python packages are required. Do not bundle a real database. The first run creates the database and the administrator password is printed by the web panel.
+
+Never include `pysip.db`, SQLite WAL/SHM files, real logs, `.env` files, private keys, production passwords, session secrets, real account exports, or machine-specific configuration in either source or binary releases.
+
+## License
+
+The Rust package metadata declares MIT. Include the corresponding `LICENSE` file in every source and binary distribution, and confirm the copyright holder and licensing rights for all included project files before publishing.
