@@ -1,0 +1,115 @@
+name: PySIP Build
+
+on:
+  push:
+    paths:
+      - "src/main.rs"
+      - "src/**/*.rs"
+      - "main.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+      - ".cargo/**"
+      - "web_panel.py"
+      - "README.md"
+      - "LICENSE"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - "src/main.rs"
+      - "src/**/*.rs"
+      - "main.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+      - ".cargo/**"
+      - "web_panel.py"
+      - "README.md"
+      - "LICENSE"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pysip-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x86_64
+            runner: ubuntu-latest
+            artifact: PySIP-Linux-x86_64
+            archive: PySIP-Linux-x86_64.tar.gz
+          - label: Windows x86_64
+            runner: windows-latest
+            artifact: PySIP-Windows-x86_64
+            archive: PySIP-Windows-x86_64.zip
+
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+
+      - name: Require committed Cargo.lock
+        shell: bash
+        run: |
+          if [ ! -f Cargo.lock ]; then
+            echo "Cargo.lock is missing. Generate it with 'cargo generate-lockfile' and commit it."
+            exit 1
+          fi
+
+      - name: Run Rust tests
+        run: cargo test --locked
+
+      - name: Build optimized executable
+        run: cargo build --release --locked
+
+      - name: Package Linux release
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          install -m 755 target/release/pysip-server dist/pysip-server
+          install -m 644 web_panel.py README.md dist/
+          if [ -f LICENSE ]; then
+            install -m 644 LICENSE dist/LICENSE
+          fi
+          tar -czf "${{ matrix.archive }}" -C dist .
+          sha256sum "${{ matrix.archive }}" > "${{ matrix.archive }}.sha256"
+
+      - name: Package Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target\release\pysip-server.exe" "dist\pysip-server.exe"
+          Copy-Item "web_panel.py", "README.md" -Destination dist
+          if (Test-Path "LICENSE") {
+            Copy-Item "LICENSE" -Destination dist
+          }
+          Compress-Archive -Path "dist\*" -DestinationPath "${{ matrix.archive }}" -Force
+          $hash = (Get-FileHash "${{ matrix.archive }}" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.archive }}" | Set-Content -Encoding ascii "${{ matrix.archive }}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 30
